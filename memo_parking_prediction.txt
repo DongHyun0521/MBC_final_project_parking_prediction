@@ -1,0 +1,22 @@
+
+타겟: 2023년
+
+- 진료 예약 데이터 (더미)
+병원 진료과 목록: 내과, 정형외과, 신경외과, 소아청소년과, 이비인후과, 피부과, 안과, 치과, 정신건강의학과, 응급의학과
+병원 운영 시간 및 요일: 평일 09:00~18:30 (점심시간 12:30~13:30, 접수 마감 17:30), 토요일 09:00~12:30 (점심시간 없음), 일요일 및 공휴일 휴진 (응급의학과만 24시간 운영)
+병원 주차장 전체 대수: 한 층 당 A1부터 D10까지 40자리, 지하 1층부터 5층까지 있음, 총 200대
+
+- 날씨/기상
+ASOS 시간 단위 : https://www.data.go.kr/data/15057210/openapi.do
+API 일반 인증키 : a913790eaa3034943cc340da8ef5b185195b7ea78dce8dc3183461115d62e68e
+
+- 대기질/미세먼지
+에어코리아 최종확정 측정자료 : https://airkorea.or.kr/web/last_amb_hour_data?pMENU_NO=123
+
+- 공휴일/국경일
+한국천문연구원_특일 정보 : https://www.data.go.kr/data/15012690/openapi.do
+API 일반 인증키 : a913790eaa3034943cc340da8ef5b185195b7ea78dce8dc3183461115d62e68e
+
+- 감염병
+국민건강 알람정보 : https://www.data.go.kr/tcs/eds/selectCoreDataView.do?coreDataInsttCode=B550928&coreDataSn=2&searchCondition1=coreDataNm&searchKeyword1=&searchOrder=INSTT_NM_ASC
+https://www.data.go.kr/data/15083145/fileData.do
