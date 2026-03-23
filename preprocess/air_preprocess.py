@@ -1,59 +1,85 @@
-import os
-import glob
 import pandas as pd
+import numpy as np
+import os
 
-def merge_air_quality_data():
-    # 1. 파일이 있는 폴더 경로 지정
-    folder_path = "MBC_final_project_parking_prediction/features/air"
+def clean_and_grade_air_data():
+    print("😷 [V2] 대기질 데이터 결측치 보간 및 환경부 기준 등급화 수술을 시작합니다...")
     
-    # 2. 💡 [수정됨] .csv 대신 .xlsx 파일들을 싹 다 찾습니다!
-    all_files = glob.glob(os.path.join(folder_path, "*.xlsx"))
+    base_path = "MBC_final_project_parking_prediction/features/air"
+    raw_file = os.path.join(base_path, "air_2015_2025_raw.csv")
     
-    if not all_files:
-        print("🚨 폴더에 Excel 파일이 없습니다. 경로를 다시 확인해 주세요!")
+    if not os.path.exists(raw_file):
+        print(f"🚨 오류: '{raw_file}' 파일이 없습니다. 이전 병합 코드를 먼저 실행해주세요.")
         return
-        
-    print(f"📂 총 {len(all_files)}개의 대기질 엑셀 파일을 발견했습니다. 병합을 시작합니다...")
-    
-    df_list = []
-    
-    # 3. 파일들을 하나씩 읽어서 리스트에 담기
-    for file in all_files:
-        file_name = os.path.basename(file)
-        
-        try:
-            # 1. 엑셀을 읽는다
-            df = pd.read_excel(file, engine='openpyxl')
-            
-            # 💡 [질문자님 아이디어 적용!] 읽자마자 바로 종로구만 싹둑 잘라낸다!
-            df_jongro_only = df[(df['지역'] == '서울 종로구') & (df['측정소명'] == '종로구')]
-            
-            # 2. 가벼워진 종로구 데이터만 리스트에 담는다
-            df_list.append(df_jongro_only)
-            
-            print(f" - ✅ {file_name} 처리 완료 (종로구 데이터만: {len(df_jongro_only):,}줄 추출)")
-            
-        except Exception as e:
-            print(f"🚨 {file_name} 읽기 실패: {e}")
-            continue
 
-    # 4. 이제 합쳐봐야 겨우 수만 줄밖에 안 되는 가벼운 표가 됩니다!
-    master_df = pd.concat(df_list, ignore_index=True)
+    # 1. 원본 데이터 불러오기
+    df = pd.read_csv(raw_file)
+    df['datetime'] = pd.to_datetime(df['datetime'])
+    df = df.set_index('datetime')
     
-    print("\n🎉 대성공! 모든 파일 병합 완료!")
-    print(f"📊 총 데이터 갯수: {len(master_df):,} 줄")
+    # 🔥 [수정 1] 결측치 치료 전에 에러코드(-999 등)를 진짜 빈칸(NaN)으로 청소!
+    df = df.replace(-999, np.nan)
     
-    # 5. 합쳐진 데이터의 컬럼명 출력
-    print("\n===========================================")
-    print("📋 [현재 합쳐진 데이터의 컬럼(열) 이름들입니다]")
-    print("===========================================")
-    print(master_df.columns.tolist())
-    print("===========================================\n")
+    # ==============================================================================
+    # 2. 결측치 치료 (Interpolation)
+    # ==============================================================================
+    print("🌡️ 1. 센서 점검으로 비어있는 시간(결측치)을 앞뒤 농도로 스무스하게 채웁니다...")
+    df['pm10'] = df['pm10'].interpolate(method='time').ffill().bfill()
+    df['pm25'] = df['pm25'].interpolate(method='time').ffill().bfill()
     
-    # 6. 💡 [핵심] 엑셀로 읽었지만, 나중에 우리가 다루기 편하도록 저장할 땐 CSV로 변환해서 저장합니다!
-    save_path = "MBC_final_project_parking_prediction/features/merged_air.csv"
-    master_df.to_csv(save_path, index=False, encoding='utf-8-sig')
-    print(f"💾 엑셀 파일들을 합쳐서 '{save_path}' (CSV 형태)로 안전하게 변환/저장했습니다.")
+    # ==============================================================================
+    # 3. 30분 단위 보간 (Upsampling)
+    # ==============================================================================
+    print("⏱️ 2. 날씨 데이터와 싱크를 맞추기 위해 30분 단위로 정밀하게 쪼갭니다...")
+    
+    # 🔥 [수정 2] 코로나 기간(2020~2023.05)이 억지로 생성되지 않게 기간을 분리해서 resample!
+    mask1 = df.index <= '2019-12-31 23:59:59'
+    mask2 = df.index >= '2023-06-01 00:00:00'
+    
+    df_period1 = df[mask1].resample('30min').interpolate(method='time')
+    df_period2 = df[mask2].resample('30min').interpolate(method='time')
+    
+    # 분리해서 뻥튀기한 데이터를 다시 하나로 합치기
+    df_30min = pd.concat([df_period1, df_period2])
+    
+    # ==============================================================================
+    # 4. 환경부 공식 기준 등급화 (단기 예보 API 매칭용)
+    # ==============================================================================
+    print("📊 3. 내일 예보 API와 똑같이 맞추기 위해 0~3 등급(좋음~매우나쁨) 파생 변수를 생성합니다...")
+    
+    # PM10 등급 (0:좋음, 1:보통, 2:나쁨, 3:매우나쁨)
+    def get_pm10_grade(val):
+        if val <= 30: return 0
+        elif val <= 80: return 1
+        elif val <= 150: return 2
+        else: return 3
+        
+    # PM2.5 등급
+    def get_pm25_grade(val):
+        if val <= 15: return 0
+        elif val <= 35: return 1
+        elif val <= 75: return 2
+        else: return 3
+        
+    df_30min['pm10_grade'] = df_30min['pm10'].apply(get_pm10_grade)
+    df_30min['pm25_grade'] = df_30min['pm25'].apply(get_pm25_grade)
+    
+    # 마무리 정리
+    df_30min['pm10'] = df_30min['pm10'].round(1)
+    df_30min['pm25'] = df_30min['pm25'].round(1)
+    df_30min = df_30min.reset_index()
+    
+    # 저장
+    save_filename = os.path.join(base_path, "air_2015_2025.csv")
+    df_30min.to_csv(save_filename, index=False, encoding='utf-8-sig')
+    
+    print("\n" + "="*50)
+    print("🎉 대성공! 모델에 바로 넣을 수 있는 '30분 단위 + 등급화' 데이터가 완성되었습니다!")
+    print("="*50)
+    print("\n👀 뇌에 쏙쏙 박히는 데이터 미리보기:")
+    print(df_30min.head(10))
+    print("\n✅ 최종 결측치 검사 (전부 0이어야 함):")
+    print(df_30min.isnull().sum())
 
 if __name__ == "__main__":
-    merge_air_quality_data()
+    clean_and_grade_air_data()
