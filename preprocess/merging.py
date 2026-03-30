@@ -128,21 +128,21 @@ def generate_final_parking_data():
     # ==============================================================================
     print("🚗 [STEP 4] 주차장 회전율 및 상시 주차 대수 계산 중...")
     df['신규_입차_차량'] = df['도착예정_차량'].shift(-1).fillna(0)
-    
-    # 🔥 [수정] 응급실 및 면회객 차량 합산!
+
+    # 응급실 및 면회객 차량 합산
     df['환자_주차대수'] = (
         df['신규_입차_차량'] * 1.0 +
         df['신규_입차_차량'].shift(1).fillna(0) * 0.9 +
         df['신규_입차_차량'].shift(2).fillna(0) * 0.6 +
         df['신규_입차_차량'].shift(3).fillna(0) * 0.2
     ).astype(int) + df['응급실_차량'] + df['면회객_차량']
-    
+
     # 상시 주차 (임직원)
     df['상시_주차대수'] = 10 + np.random.randint(-2, 3, size=len(df))
     is_workday = (df['weekday'] < 5) & (df['is_holiday'] == 0)
     is_saturday = (df['weekday'] == 5) & (df['is_holiday'] == 0)
     is_working_day = is_workday | is_saturday
-    
+
     df.loc[is_working_day & (df['time_val'] == 8.0), '상시_주차대수'] = 30 + np.random.randint(-3, 4, sum(is_working_day & (df['time_val'] == 8.0)))
     df.loc[is_working_day & (df['time_val'] == 8.5), '상시_주차대수'] = 45 + np.random.randint(-3, 4, sum(is_working_day & (df['time_val'] == 8.5)))
     df.loc[is_workday & (df['time_val'] >= 9.0) & (df['time_val'] <= 19.5), '상시_주차대수'] = 50 + np.random.randint(-4, 5, sum(is_workday & (df['time_val'] >= 9.0) & (df['time_val'] <= 19.5)))
@@ -157,7 +157,7 @@ def generate_final_parking_data():
             return val
         else:
             return int(180 + (val - 180) * 0.5)
-            
+
     df['최종_주차대수'] = df['최종_주차대수'].apply(apply_soft_cap)
 
     # ==============================================================================
@@ -166,12 +166,12 @@ def generate_final_parking_data():
     print("🧹 [STEP 5] 모델이 학습할 순수 피처(Feature)만 추려내는 중...")
     final_cols = [
         'datetime', 'date', 'hour', 'is_holiday', 'holiday_name',
-        '예약_내과', '예약_정형외과', '예약_소아청소년과', '예약_이비인후과', 
-        '예약_신경외과', '예약_피부과', '예약_안과', '예약_치과', '예약_정신건강의학과', 
-        '예약_총외래환자', 
+        '예약_내과', '예약_정형외과', '예약_소아청소년과', '예약_이비인후과',
+        '예약_신경외과', '예약_피부과', '예약_안과', '예약_치과', '예약_정신건강의학과',
+        '예약_총외래환자',
         'temp', 'rainfall_mm', 'wind_speed', 'humidity', 'snowfall_cm',
         'pm10', 'pm25', 'pm10_grade', 'pm25_grade',
-        '최종_주차대수' 
+        '최종_주차대수'
     ]
     
     existing_cols = [c for c in final_cols if c in df.columns]
