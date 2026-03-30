@@ -33,30 +33,26 @@ print("======================================")
 
 # 💡 2. Java ↔ Python 완벽 매핑 통신 규약
 class ParkingRequest(BaseModel):
-    # 🔥 [핵심 추가] Java에서 어떤 모델을 쓸지 파이썬에게 지시하는 값
-    # "vshort" (초단기), "short" (단기), "mid" (중기) 중 하나를 보냄
-    forecast_type: str 
+    forecast_type: str
+    target_datetime: str = ""   # ← 추가: "2026-03-29 14:30" 형식
 
-    # [1] 시간 데이터
     month: int
-    dayofweek: int       
+    dayofweek: int
     hour: int
-    is_holiday: int      
+    minute: int
+    is_holiday: int
 
-    # [2] 기상 데이터 (Optional 처리: 중기예보에서 안 보내줘도 에러 안 나게 방어)
-    temp: float          
-    rainfall_mm: float   
-    wind_speed: float = 2.0       # 기본값 세팅
-    humidity: int = 50            # 기본값 세팅
-    snowfall_cm: float = 0.0      # 기본값 세팅
+    temp: float
+    rainfall_mm: float
+    wind_speed: float = 2.0
+    humidity: int = 50
+    snowfall_cm: float = 0.0
 
-    # [3] 대기오염 데이터 (Optional 처리)
-    pm10: float = 40.0            # 기본값 세팅
-    pm25: float = 15.0            # 기본값 세팅
-    pm10_grade: int = 1           
+    pm10: float = 40.0
+    pm25: float = 15.0
+    pm10_grade: int = 1
     pm25_grade: int = 1
 
-    # [4] 예약 환자 데이터 
     예약_내과: int = 0
     예약_정형외과: int = 0
     예약_소아청소년과: int = 0
@@ -74,7 +70,7 @@ async def predict_parking(data: ParkingRequest):
     weekdays = ["월", "화", "수", "목", "금", "토", "일"]
     weekday_str = weekdays[data.dayofweek]
 
-    print(f"\n📥 [요청 수신] {data.month}월 {weekday_str}요일 {data.hour}시 주차 예측")
+    print(f"\n📥 [요청 수신] {data.target_datetime} ({weekday_str}요일) {data.minute}분 입차 예측")   # ← 수정
     print(f"🎯 [타겟 모델] {data.forecast_type.upper()} (Java 지정)")
     
     # 올바른 forecast_type이 들어왔는지 검증
@@ -93,6 +89,7 @@ async def predict_parking(data: ParkingRequest):
         if 'month' in input_data: input_data['month'] = data.month
         if 'dayofweek' in input_data: input_data['dayofweek'] = data.dayofweek
         if 'hour' in input_data: input_data['hour'] = data.hour
+        if 'minute' in input_data: input_data['minute'] = data.minute
         if 'is_holiday' in input_data: input_data['is_holiday'] = data.is_holiday
         if 'temp' in input_data: input_data['temp'] = data.temp
         if 'rainfall_mm' in input_data: input_data['rainfall_mm'] = data.rainfall_mm
