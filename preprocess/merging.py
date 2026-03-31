@@ -165,7 +165,8 @@ def generate_final_parking_data():
     # ==============================================================================
     print("🧹 [STEP 5] 모델이 학습할 순수 피처(Feature)만 추려내는 중...")
     final_cols = [
-        'datetime', 'date', 'hour', 'is_holiday', 'holiday_name',
+        'datetime', 'date', 'hour', 'minute', 
+        'is_holiday', 'holiday_name',
         '예약_내과', '예약_정형외과', '예약_소아청소년과', '예약_이비인후과',
         '예약_신경외과', '예약_피부과', '예약_안과', '예약_치과', '예약_정신건강의학과',
         '예약_총외래환자',
