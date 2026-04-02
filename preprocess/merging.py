@@ -8,6 +8,11 @@ def generate_final_parking_data():
     
     # 1. 파일 불러오기
     df_res = pd.read_csv(os.path.join(base_path, 'reservation/reservation_2015_2025.csv'))
+    # ================================
+    res_cols = [c for c in df_res.columns if '예약' in c]
+    df_res[res_cols] = df_res[res_cols].rolling(window=2, min_periods=1).mean().astype(int)
+    # ================================
+
     df_weather = pd.read_csv(os.path.join(base_path, 'weather/weather_2015_2025.csv'))
     df_air = pd.read_csv(os.path.join(base_path, 'air/air_2015_2025.csv'))
     df_hol = pd.read_csv(os.path.join(base_path, 'holiday/holiday_2015_2025.csv'))
