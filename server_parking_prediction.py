@@ -1,58 +1,58 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import Optional
-import pandas as pd
-import joblib
-import uvicorn
+"""
+주차 수요 예측 AI 서버 (port 8002)
+
+Random Forest 모델 3종(초단기/단기/중기)으로 시간대별 입차 대수 예측.
+Spring Boot 스케줄러가 기상/예약 데이터와 함께 호출.
+"""
 import os
 import traceback
 
-app = FastAPI(title="🅿️ 주차 수요 예측 AI 앙상블 서버 (초단기/단기/중기)")
+import pandas as pd
+import joblib
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
-print("======================================")
-print("🧠 AI 뇌(Random Forest 3종 세트) 로딩 중...")
+# ═══════════════════════════════════════════════════════════════════
+# 모델 로드 (서버 기동 시 1회)
+# ═══════════════════════════════════════════════════════════════════
+BASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "features")
 
-base_path = "MBC_final_project_parking_prediction/features"
-
-# 1. 3개의 맞춤형 모델과 컬럼 정보 미리 모두 로딩
 models = {}
-try:
-    for m_type in ["vshort", "short", "mid"]:
-        model_path = os.path.join(base_path, f"parking_rf_{m_type}.pkl")
-        columns_path = os.path.join(base_path, f"columns_{m_type}.pkl")
-        
-        models[m_type] = {
-            "model": joblib.load(model_path),
-            "columns": joblib.load(columns_path)
-        }
-    print("✅ 초단기/단기/중기 3종 모델 로딩 완벽 성공! (포트 8002 대기 중)")
-except Exception as e:
-    print(f"🚨 모델 로딩 실패! 파일 경로를 확인하세요: {e}")
-print("======================================")
+for m_type in ["vshort", "short", "mid"]:
+    models[m_type] = {
+        "model":   joblib.load(os.path.join(BASE_DIR, f"parking_rf_{m_type}.pkl")),
+        "columns": joblib.load(os.path.join(BASE_DIR, f"columns_{m_type}.pkl")),
+    }
+    print(f"  Random Forest ({m_type}): 로드 완료")
 
-
-# 💡 2. Java ↔ Python 완벽 매핑 통신 규약
+# ═══════════════════════════════════════════════════════════════════
+# 요청 스키마 (Spring Boot → Python)
+# ═══════════════════════════════════════════════════════════════════
 class ParkingRequest(BaseModel):
-    forecast_type: str
-    target_datetime: str = ""   # ← 추가: "2026-03-29 14:30" 형식
+    forecast_type: str              # "vshort" | "short" | "mid"
+    target_datetime: str = ""       # "2026-03-29 14:30"
 
+    # 시간 피처
     month: int
     dayofweek: int
     hour: int
     minute: int
     is_holiday: int
 
+    # 기상 피처
     temp: float
     rainfall_mm: float
     wind_speed: float = 2.0
     humidity: int = 50
     snowfall_cm: float = 0.0
 
+    # 대기질 피처
     pm10: float = 40.0
     pm25: float = 15.0
     pm10_grade: int = 1
     pm25_grade: int = 1
 
+    # 9개 진료과 예약 피처
     예약_내과: int = 0
     예약_정형외과: int = 0
     예약_소아청소년과: int = 0
@@ -63,83 +63,63 @@ class ParkingRequest(BaseModel):
     예약_치과: int = 0
     예약_정신건강의학과: int = 0
 
+# 요청 필드 → 모델 컬럼 매핑에 사용할 필드 목록
+_REQUEST_FIELDS = [
+    'month', 'dayofweek', 'hour', 'minute', 'is_holiday',
+    'temp', 'rainfall_mm', 'wind_speed', 'humidity', 'snowfall_cm',
+    'pm10', 'pm25', 'pm10_grade', 'pm25_grade',
+    '예약_내과', '예약_정형외과', '예약_소아청소년과', '예약_이비인후과',
+    '예약_신경외과', '예약_피부과', '예약_안과', '예약_치과', '예약_정신건강의학과',
+]
 
-# 3. 예측 API 엔드포인트
+_DEPT_FIELDS = [
+    '예약_내과', '예약_정형외과', '예약_소아청소년과', '예약_이비인후과',
+    '예약_신경외과', '예약_피부과', '예약_안과', '예약_치과', '예약_정신건강의학과',
+]
+
+# ═══════════════════════════════════════════════════════════════════
+# API
+# ═══════════════════════════════════════════════════════════════════
+app = FastAPI()
+
+
 @app.post("/parking_prediction")
 async def predict_parking(data: ParkingRequest):
-    weekdays = ["월", "화", "수", "목", "금", "토", "일"]
-    weekday_str = weekdays[data.dayofweek]
-
-    print(f"\n📥 [요청 수신] {data.target_datetime} ({weekday_str}요일) {data.minute}분 입차 예측")   # ← 수정
-    print(f"🎯 [타겟 모델] {data.forecast_type.upper()} (Java 지정)")
-    
-    # 올바른 forecast_type이 들어왔는지 검증
     if data.forecast_type not in models:
-        raise HTTPException(status_code=400, detail="forecast_type은 'vshort', 'short', 'mid' 중 하나여야 합니다.")
+        raise HTTPException(status_code=400, detail="forecast_type: 'vshort', 'short', 'mid' 중 하나")
 
     try:
-        # 1) Java가 지시한 타겟 모델과 컬럼 정보 꺼내오기
-        target_model = models[data.forecast_type]["model"]
+        target_model   = models[data.forecast_type]["model"]
         target_columns = models[data.forecast_type]["columns"]
 
-        # 2) 해당 모델이 필요로 하는 빈칸(0) 만들기
+        # 모델이 필요로 하는 컬럼만 0으로 초기화 후, 요청 데이터로 덮어쓰기
         input_data = {col: 0 for col in target_columns}
-        
-        # 3) Java에서 보내준 데이터 덮어쓰기 (공통 변수)
-        if 'month' in input_data: input_data['month'] = data.month
-        if 'dayofweek' in input_data: input_data['dayofweek'] = data.dayofweek
-        if 'hour' in input_data: input_data['hour'] = data.hour
-        if 'minute' in input_data: input_data['minute'] = data.minute
-        if 'is_holiday' in input_data: input_data['is_holiday'] = data.is_holiday
-        if 'temp' in input_data: input_data['temp'] = data.temp
-        if 'rainfall_mm' in input_data: input_data['rainfall_mm'] = data.rainfall_mm
-        
-        # 모델별로 필요한 변수만 쏙쏙 골라서 덮어씀 (에러 완벽 차단)
-        if 'wind_speed' in input_data: input_data['wind_speed'] = data.wind_speed
-        if 'humidity' in input_data: input_data['humidity'] = data.humidity
-        if 'snowfall_cm' in input_data: input_data['snowfall_cm'] = data.snowfall_cm
-        if 'pm10' in input_data: input_data['pm10'] = data.pm10
-        if 'pm25' in input_data: input_data['pm25'] = data.pm25
-        if 'pm10_grade' in input_data: input_data['pm10_grade'] = data.pm10_grade
-        if 'pm25_grade' in input_data: input_data['pm25_grade'] = data.pm25_grade
-        
-        if '예약_내과' in input_data: input_data['예약_내과'] = data.예약_내과
-        if '예약_정형외과' in input_data: input_data['예약_정형외과'] = data.예약_정형외과
-        if '예약_소아청소년과' in input_data: input_data['예약_소아청소년과'] = data.예약_소아청소년과
-        if '예약_이비인후과' in input_data: input_data['예약_이비인후과'] = data.예약_이비인후과
-        if '예약_신경외과' in input_data: input_data['예약_신경외과'] = data.예약_신경외과
-        if '예약_피부과' in input_data: input_data['예약_피부과'] = data.예약_피부과
-        if '예약_안과' in input_data: input_data['예약_안과'] = data.예약_안과
-        if '예약_치과' in input_data: input_data['예약_치과'] = data.예약_치과
-        if '예약_정신건강의학과' in input_data: input_data['예약_정신건강의학과'] = data.예약_정신건강의학과
-        
-        # 🔥 가장 중요한 핵심 피처 자동 계산
+        for field in _REQUEST_FIELDS:
+            if field in input_data:
+                input_data[field] = getattr(data, field)
+
+        # 총외래환자 = 9개 진료과 합산 (파생 피처)
         if '예약_총외래환자' in input_data:
-            input_data['예약_총외래환자'] = (
-                data.예약_내과 + data.예약_정형외과 + data.예약_소아청소년과 + 
-                data.예약_이비인후과 + data.예약_신경외과 + data.예약_피부과 + 
-                data.예약_안과 + data.예약_치과 + data.예약_정신건강의학과
-            )
-            
-        # 4) AI 예측 실행
-        df_input = pd.DataFrame([input_data])
-        df_input = df_input[target_columns] # 컬럼 순서 완벽 정렬
-        
-        prediction = target_model.predict(df_input)[0]
-        result_cars = int(prediction)
-        
-        print(f"✨ [예측 성공] 결과: {result_cars}대 (사용 모델: {data.forecast_type})")
-        
+            input_data['예약_총외래환자'] = sum(getattr(data, f) for f in _DEPT_FIELDS)
+
+        # 예측 실행
+        df = pd.DataFrame([input_data])[target_columns]
+        predicted_cars = int(target_model.predict(df)[0])
+
+        weekdays = ["월", "화", "수", "목", "금", "토", "일"]
+        print(f"  [{data.forecast_type}] {data.target_datetime} ({weekdays[data.dayofweek]}) → {predicted_cars}대")
+
         return {
             "status": "success",
             "forecast_type": data.forecast_type,
-            "predicted_cars": result_cars,
-            "message": f"성공 ({result_cars}대)"
+            "predicted_cars": predicted_cars,
         }
-        
+
     except Exception as e:
-        print(f"🚨 [에러]: {traceback.format_exc()}")
+        traceback.print_exc()
         return {"status": "error", "message": str(e)}
 
+
 if __name__ == "__main__":
-    uvicorn.run("server_parking_prediction:app", host="0.0.0.0", port=8002, reload=True)
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8002)

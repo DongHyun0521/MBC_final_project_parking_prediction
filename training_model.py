@@ -14,9 +14,7 @@ def train_three_models():
 
     df['datetime'] = pd.to_datetime(df['datetime'])
     df['month'] = df['datetime'].dt.month
-    df['dayofweek'] = df['datetime'].dt.dayofweek 
-    # 🔥 [수정 1] minute(분) 데이터 살려두기! (30분 단위 예측용)
-    df['minute'] = df['datetime'].dt.minute
+    df['dayofweek'] = df['datetime'].dt.dayofweek
     
     cols_to_drop_init = ['datetime', 'date', '최종_주차대수', 'minute']
     X_master = df.drop(columns=[c for c in cols_to_drop_init if c in df.columns])
